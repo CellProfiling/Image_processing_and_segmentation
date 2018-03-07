@@ -13,15 +13,19 @@ from scipy import ndimage as ndi
 from PIL import Image
 import gzip
 
+import Segmentation_pipeline_helper
+
 ##### EXECUTION PIPELINE FOR CELL SEGMENTATION
 
 # Define path to image input directory
-imageinput = "nucleoli"#"zprojs_organelle_markerplate4_subset/"
+imageinput = "/Users/ngoc.le/Desktop/U2OS_noccd/TIF_GZ"
 
 # Define desired path to save the segmented images
-imageoutput = "Nuclei_nucleoli/PNG/"
+imageoutput = "/Users/ngoc.le/Desktop/U2OS_noccd/PNG"
 
-
+if not os.path.exists(imageoutput):
+    os.makedirs(imageoutput)
+    
 # Make a list of path to the tif.gz files
 nuclei = find(imageinput,prefix=None, suffix="_blue.tif.gz",recursive=False) #blue chanel =nu
 nucleoli = []
@@ -40,28 +44,40 @@ for index,imgpath in enumerate(nuclei):
     # Unzip .gz file and read content image to img
     with gzip.open(imgpath) as f:
         nu = plt.imread(f)
-        if len(img.shape) == 3:
-            img=img[:,:,2]
-            
-    with gzip.open(nucleoli[index]) as f:
-        org = plt.imread(f)
-        if len(org.shape) == 3:
-            org=img2[:,:,1]
-            
-    with gzip.open(microtubule[index]) as f:
-        mi = plt.imread(f)
-        if len(mi.shape) == 3:
-            mi=mi[:,:,0]
+        if len(nu.shape) > 2:
+            nu=nu[:,:,2]
     
+    try:
+        with gzip.open(nucleoli[index]) as f:
+            org = plt.imread(f)
+            if len(org.shape) > 2:
+                org=org[:,:,1]
+    except:
+        continue  
+    
+    try:
+        with gzip.open(microtubule[index]) as f:
+            mi = plt.imread(f)
+            if len(mi.shape) > 2:
+                mi=mi[:,:,0]
+    except:
+        continue      
+
     # obtain nuclei seed for watershed segmentation
     seed, num = watershed_lab(nu)
     
     # segment microtubule image
-    #marker = np.full_like(seed, 0)
-    #marker[seed > 0] = seed[seed > 0] + 1 #foreground
-    #marker[mi == 0] = 1 #background
-    #labels = watershed_lab(mi, marker = marker)
-    labels = watershed_lab2(mi, marker = seed)
+    marker = np.full_like(seed, 0)
+    marker[mi == 0] = 1 #background
+#    marker = skimage.morphology.binary_erosion(marker,skimage.morphology.square(3)).astype(int)
+    marker[seed > 0] = seed[seed > 0] + 1 #foreground
+    labels = watershed_lab2(mi, marker = marker)
+    
+    #remove all cells where nucleus is touching the border
+    labels = labels - 1
+    border_indice = find_border(seed)
+    mask = np.in1d(labels,border_indice).reshape(labels.shape)
+    labels[mask] = 0
     
     # Cut boundingbox
     i=0
@@ -77,21 +93,23 @@ for index,imgpath in enumerate(nuclei):
         mask[mask == region.label] = 1
 
         cell_nuclei = nu[minr:maxr,minc:maxc]*mask
-        cell_nucleoli = np.full_like(cell_nuclei,0)*mask
+        cell_nucleoli = org[minr:maxr,minc:maxc]*mask
         cell_microtubule = mi[minr:maxr,minc:maxc]*mask
-        
         # stack channels
         cell = np.dstack((cell_microtubule,cell_nucleoli,cell_nuclei))
         if cell.dtype == 'uint16' :
             cell = (cell/255).astype(np.uint8) #the input file was uint16
-        
-        # rotate cell by the major axis       
-        #cell = cell.rotate("angel")
-        
-        fig = Image.fromarray(cell)
-        fig = resize_pad(fig)
-        name = "%s_cell%s.%s" % (nu[i],str(i), "png")
+
+        # align cell to the 1st major axis  
+        theta=region.orientation*180/np.pi #radiant to degree conversion
+        cell = ndi.rotate(cell, 90-theta)
+         
+        # resize images
+        fig = resize_pad(cell) # default size is 256x256
+        name = "%s_cell%s.%s" % ((nuclei[index].split("TIF_GZ/"))[1].split("blue")[0],str(i), "png")
         name = name.replace("/", "_")
+        
         savepath= os.path.join(imageoutput, name)
         #plt.savefig(savepath)
         fig.save(savepath)
+        
