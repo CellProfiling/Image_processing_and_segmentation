@@ -64,7 +64,9 @@ def watershed_lab(image, marker = None):
     return labeled_obj, num
 
 def watershed_lab2(image, marker = None):
-    
+    """Watershed segmentation with topological distance 
+    and keep the relative ratio of the cells to each other
+    """
     distance = ndi.distance_transform_edt(image)
     distance = skimage.segmentation.clear_border(distance, buffer_size=50)
     # determine markers for watershed if not specified
@@ -79,10 +81,11 @@ def watershed_lab2(image, marker = None):
     return segmentation
 
 
-# Function to resize and pad segmented image, keeping the aspect ratio 
-#(maybe keep the relative ratio of the cells to each other as well?)
+# 
 def resize_pad(image, size = 256): #input an Image object (PIL)
-    
+    """Function to resize and pad segmented image, keeping the aspect ratio 
+    and keep the relative ratio of the cells to each other
+    """
     image = Image.fromarray(image)
     desired_size = size 
     
@@ -152,3 +155,31 @@ def find_border(labels, buffer_size=0, bgval=0, in_place=False):
     borders_indices = np.unique(labels[borders])
     
     return borders_indices
+
+
+
+def pixel_norm(image):
+    
+    # background correction: substracting the most populous pixel value
+    image = image - np.median(image)
+    image[image < 0] = 0
+    
+    # rescaling image intensity to a value between 0 and 1
+    image = (image - image.min())/(image.max() - image.min())
+        
+    return image
+    
+def shift_center_mass(image):
+    
+    img = np.asanyarray(image)
+    cm_nu = ndi.measurements.center_of_mass(img[:,:,2])
+    
+    Shift = np.zeros_like(img)
+    for channel in (0,1,2): 
+        im = img[:,:,channel]
+        c = [im.shape[0]/2.,im.shape[1]/2.]
+        S = np.roll(im, int(round(c[0]-cm_nu[0])) , axis=0)
+        S = np.roll(S, int(round(c[1]-cm_nu[1])), axis=1)
+        Shift[:,:,channel] = S
+        
+    return Shift

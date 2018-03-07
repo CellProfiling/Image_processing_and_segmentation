@@ -18,10 +18,10 @@ import Segmentation_pipeline_helper
 ##### EXECUTION PIPELINE FOR CELL SEGMENTATION
 
 # Define path to image input directory
-imageinput = "/Users/ngoc.le/Desktop/U2OS_noccd/TIF_GZ"
+imageinput = "~/U2OS_noccd/TIF_GZ"
 
 # Define desired path to save the segmented images
-imageoutput = "/Users/ngoc.le/Desktop/U2OS_noccd/PNG"
+imageoutput = "~/Desktop/U2OS_noccd/PNG"
 
 if not os.path.exists(imageoutput):
     os.makedirs(imageoutput)
@@ -87,7 +87,8 @@ for index,imgpath in enumerate(nuclei):
         # draw rectangle around segmented cell and
         # apply a binary mask to the selected region, to eliminate signals from surrounding cell
         minr, minc, maxr, maxc = region.bbox
-
+                
+        # get mask
         mask = labels[minr:maxr,minc:maxc].astype(np.uint8)
         mask[mask != region.label] = 0
         mask[mask == region.label] = 1
@@ -95,9 +96,10 @@ for index,imgpath in enumerate(nuclei):
         cell_nuclei = nu[minr:maxr,minc:maxc]*mask
         cell_nucleoli = org[minr:maxr,minc:maxc]*mask
         cell_microtubule = mi[minr:maxr,minc:maxc]*mask
+
         # stack channels
         cell = np.dstack((cell_microtubule,cell_nucleoli,cell_nuclei))
-        if cell.dtype == 'uint16' :
+        if cell.dtype != 'uint8' :
             cell = (cell/255).astype(np.uint8) #the input file was uint16
 
         # align cell to the 1st major axis  
@@ -106,6 +108,10 @@ for index,imgpath in enumerate(nuclei):
          
         # resize images
         fig = resize_pad(cell) # default size is 256x256
+        # center to the center of mass of the nucleus
+        fig = shift_center_mass(fig)
+        
+        fig = Image.fromarray(fig)
         name = "%s_cell%s.%s" % ((nuclei[index].split("TIF_GZ/"))[1].split("blue")[0],str(i), "png")
         name = name.replace("/", "_")
         
