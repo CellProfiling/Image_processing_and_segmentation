@@ -13,15 +13,15 @@ from scipy import ndimage as ndi
 from PIL import Image
 import gzip
 
-import Segmentation_pipeline_helper
+from Segmentation_pipeline_helper import find, find_border, watershed_lab, watershed_lab2, resize_pad, shift_center_mass
 
 ##### EXECUTION PIPELINE FOR CELL SEGMENTATION
 
 # Define path to image input directory
-imageinput = "~/U2OS_noccd/TIF_GZ"
+imageinput = "/afs/pdc.kth.se/projects/cellprofiling/projects/integrated_cell/data/nucleoli_v18_U2OS_noccd/TIF_GZ"
 
 # Define desired path to save the segmented images
-imageoutput = "~/Desktop/U2OS_noccd/PNG"
+imageoutput = "/afs/pdc.kth.se/projects/cellprofiling/projects/integrated_cell/data/nucleoli_v18_U2OS_noccd/PNG"
 
 if not os.path.exists(imageoutput):
     os.makedirs(imageoutput)
