@@ -6,7 +6,11 @@ Created on Mon Mar  5 14:33:49 2018
 @author: trang.le
 """
 import os
-import skimage
+from skimage.filters import threshold_otsu, gaussian, sobel
+from skimage.measure import regionprops 
+from skimage.feature import peak_local_max
+from skimage.morphology import watershed, closing, square
+from skimage.segmentation import clear_border
 from scipy import ndimage as ndi
 from PIL import Image
 import numpy as np
@@ -30,30 +34,31 @@ def find(dirpath, prefix=None, suffix=None, recursive=True):
 # Segmentation function
 # watershed algorithm to segment the 2d image based on foreground and background seeed plus edges (sobel) as elevation map
 # returns labeled segmented image
-def watershed_lab(image, marker = None):
+def watershed_lab(image, marker = None, rm_border = False):
     
     # determine markers for watershed if not specified
     if marker is None:
         marker = np.full_like(image,0)
         marker[image ==0] = 1 #background
-        marker[image > skimage.filters.threshold_otsu(image)] = 2 #foreground nuclei
+        marker[image > threshold_otsu(image)] = 2 #foreground nuclei
 
     # use sobel to detect edge, then smooth with gaussian filter
-    elevation_map = skimage.filters.gaussian(skimage.filters.sobel(image),sigma=2)
+    elevation_map = gaussian(sobel(image),sigma=2)
     
     #segmentation with watershed algorithms
-    segmentation = skimage.morphology.watershed(elevation_map, marker)
+    segmentation = watershed(elevation_map, marker)
     segmentation = ndi.binary_fill_holes(segmentation - 1)
     labeled_obj, num = ndi.label(segmentation)
     
-    # remove bordered objects, now moved to later steps of segmentation pipeline
-#    bw = skimage.morphology.closing(labeled_obj > 0, skimage.morphology.square(3))
-#    cleared = skimage.segmentation.clear_border(bw)
-#    labeled_obj, num = ndi.label(cleared)
+    if rm_border is True:
+        # remove bordered objects, now moved to later steps of segmentation pipeline
+        bw = closing(labeled_obj > 0, square(3))
+        cleared = clear_border(bw)
+        labeled_obj, num = ndi.label(cleared)
     
     # remove too small or too large object 
     output = np.zeros(labeled_obj.shape)
-    for region in skimage.measure.regionprops(labeled_obj):
+    for region in regionprops(labeled_obj):
         if region.area >= 2000:# <= thres_high:
             # if the component has a volume within the two thresholds,
             # set the output image to 1 for every pixel of the component
@@ -68,15 +73,15 @@ def watershed_lab2(image, marker = None):
     and keep the relative ratio of the cells to each other
     """
     distance = ndi.distance_transform_edt(image)
-    distance = skimage.segmentation.clear_border(distance, buffer_size=50)
+    distance = clear_border(distance, buffer_size=50)
     # determine markers for watershed if not specified
     if marker is None:
-        local_maxi = skimage.feature.peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
+        local_maxi = peak_local_max(distance, indices=False, footprint=np.ones((3, 3)),
                             labels=image)
         marker = ndi.label(local_maxi)[0]
 
     #segmentation with watershed algorithms
-    segmentation = skimage.morphology.watershed(-distance, marker, mask = image)
+    segmentation = watershed(-distance, marker, mask = image)
                 
     return segmentation
 
@@ -92,7 +97,7 @@ def resize_pad(image, size = 256): #input an Image object (PIL)
     # current size of the image
     old_size=image.size
     # old_size[0] is in (width, height) format
-    ratio = 0.2 #float(desired_size)/max(old_size) 
+    ratio = 0.3 #float(desired_size)/max(old_size) 
     
     # size of the image after reduced by half
     new_size = tuple([int(x*ratio) for x in old_size])
@@ -179,7 +184,7 @@ def shift_center_mass(image):
         im = img[:,:,channel]
         c = [im.shape[0]/2.,im.shape[1]/2.]
         S = np.roll(im, int(round(c[0]-cm_nu[0])) , axis=0)
-        S = np.roll(S, int(round(c[1]-cm_nu[1])), axis=1)
+        S = np.roll(S, int(round(c[1]-cm_nu[1])), axis=1)        
         Shift[:,:,channel] = S
         
     return Shift
