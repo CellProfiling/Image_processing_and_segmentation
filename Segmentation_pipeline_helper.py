@@ -15,8 +15,12 @@ from scipy import ndimage as ndi
 from PIL import Image
 import numpy as np
 
-# function to find recursively all files with specific prefix and suffix in a directory
+
 def find(dirpath, prefix=None, suffix=None, recursive=True):
+    """Function to find recursively all files with specific prefix and suffix in a directory
+    Return a list of paths
+    """
+
     l=[]
     if not prefix:
         prefix = ''
@@ -31,11 +35,12 @@ def find(dirpath, prefix=None, suffix=None, recursive=True):
 
 
 
-# Segmentation function
-# watershed algorithm to segment the 2d image based on foreground and background seeed plus edges (sobel) as elevation map
-# returns labeled segmented image
 def watershed_lab(image, marker = None, rm_border = False):
-    
+    """Segmentation function
+    Watershed algorithm to segment the 2d image based on foreground and background seed 
+    and use edges (sobel) as elevation map
+    return labeled nuclei
+    """
     # determine markers for watershed if not specified
     if marker is None:
         marker = np.full_like(image,0)
@@ -71,6 +76,7 @@ def watershed_lab(image, marker = None, rm_border = False):
 def watershed_lab2(image, marker = None):
     """Watershed segmentation with topological distance 
     and keep the relative ratio of the cells to each other
+    return labeled cell body, each has 1 nuclei
     """
     distance = ndi.distance_transform_edt(image)
     distance = clear_border(distance, buffer_size=50)
@@ -85,8 +91,7 @@ def watershed_lab2(image, marker = None):
                 
     return segmentation
 
-
-# 
+ 
 def resize_pad(image, size = 256): #input an Image object (PIL)
     """Function to resize and pad segmented image, keeping the aspect ratio 
     and keep the relative ratio of the cells to each other
@@ -114,9 +119,8 @@ def resize_pad(image, size = 256): #input an Image object (PIL)
 
 
 
-# Function to find the indices of objects touching border
 def find_border(labels, buffer_size=0, bgval=0, in_place=False):
-    """Find objects connected to the label image border.
+    """Find indices of objects connected to the label image border.
     Adjusted from skimage.segmentation.clear_border()
     Parameters
     ----------
@@ -164,6 +168,8 @@ def find_border(labels, buffer_size=0, bgval=0, in_place=False):
 
 
 def pixel_norm(image):
+    """Function to normalize pixel value
+    """
     
     # background correction: substracting the most populous pixel value
     image = image - np.median(image)
@@ -175,7 +181,10 @@ def pixel_norm(image):
     return image
     
 def shift_center_mass(image):
-    
+    """Function to center images to the Nuclei center of mass
+    assuming channel 2 is the nuclei channel
+    """
+   
     img = np.asanyarray(image)
     cm_nu = ndi.measurements.center_of_mass(img[:,:,2])
     
