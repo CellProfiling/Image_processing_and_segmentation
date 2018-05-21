@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Mar 12 15:52:41 2018
-
-@author: ngoc.le
-"""
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
 Created on Thu Mar  1 12:52:38 2018
+Last Change: 21/05/2018 13:41
 
 @author: trangle
+
+Modified by:
+@author: cwinsnes
+
 """
+import click
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -21,92 +20,163 @@ from scipy import ndimage as ndi
 from PIL import Image
 import gzip
 
-from Segmentation_pipeline_helper import find, watershed_lab, watershed_lab2, resize_pad, find_border, pixel_norm, shift_center_mass
+from Segmentation_pipeline_helper import find, watershed_lab, resize_pad
+from Segmentation_pipeline_helper import shift_center_mass, pixel_norm
 
-##### EXECUTION PIPELINE FOR CELL SEGMENTATION
+############################################
+# EXECUTION PIPELINE FOR CELL SEGMENTATION #
+############################################
 
-# Define path to image input directory
-imageinput = "/Users/ngoc.le/Desktop/U2OS_noccd/TIF_GZ"
 
-# Define desired path to save the segmented images
-imageoutput = "/Users/ngoc.le/Desktop/U2OS_noccd/PNG_nuclei"
+def extract_img_arrays(microtubule_imgs, protein_imgs, nuclei_imgs):
+    """
+    Extract the numerical arrays that represent the input images.
+    Extracts only the relevant channel of the input image if it is RGB,
+    blue for nuclei, red for microtubule, and green for proteins.
 
-if not os.path.exists(imageoutput):
-    os.makedirs(imageoutput)
-    
-# Make a list of path to the tif.gz files
-nuclei = find(imageinput,prefix=None, suffix="_blue.tif.gz",recursive=False) #blue chanel =nu
-nucleoli = []
-microtubule = []
-for f in nuclei:
-    f=f.replace('blue','green')
-    nucleoli.append(f)
-    f=f.replace('green','red')
-    microtubule.append(f)
+    This always results in every returned array being 2D (grayscale).
 
-# For each image, import 3 chanels
-# Use nuclei as seed, microtubule as edges to segment the image
-# Cut the bounding box of each cell (3channels) in the respective image, slack and save
-for index,imgpath in enumerate(nuclei):
-    
-    print("Segmenting image {0}/{1}".format(index,len(nuclei)))
-    # Unzip .gz file and read content image to img
-    try:
-        with gzip.open(imgpath) as f:
-            nu = plt.imread(f)
-            if len(nu.shape) > 2:
-                nu=nu[:,:,2]
-    except:
-        print("%s does not have valid nucleus channel" % (nuclei[index].split("TIF_GZ/"))[1].split("blue")[0])
-        continue
-    
-    try:
-        with gzip.open(nucleoli[index]) as f:
-            org = plt.imread(f)
-            if len(org.shape) > 2:
-                org=org[:,:,1]
-    except:
-        print("%s does not have valid nucleoli channel" % (nuclei[index].split("TIF_GZ/"))[1].split("blue")[0])
-        continue  
+    The function assumes that all the input lists are of the same length.
+    If an image is missing, all channels on the same index will be skipped.
 
-    # obtain nuclei seed for watershed segmentation
-    labels, num = watershed_lab(nu, rm_border=True)
-       
-    # Cut boundingbox
-    i=0
-    for region in skimage.measure.regionprops(labels):
-        i=i+1
-        
-        # draw rectangle around segmented cell and
-        # apply a binary mask to the selected region, to eliminate signals from surrounding cell
-        minr, minc, maxr, maxc = region.bbox
-                
-        # get mask
-        mask = labels[minr:maxr,minc:maxc].astype(np.uint8)
-        mask[mask != region.label] = 0
-        mask[mask == region.label] = 1
+    Arguments:
+        microtubule_imgs: A list of paths to microtubule images.
+        protein_imgs: A list of paths to protein images.
+        nuclei_imgs: A list of paths to nuclei images.
 
-        cell_nuclei = pixel_norm(nu[minr:maxr,minc:maxc]*mask)
-        cell_nucleoli = pixel_norm(org[minr:maxr,minc:maxc]*mask)
-        cell_microtubule = np.full_like(cell_nuclei,0)
+    Returns:
+        A generator which yields grayscale image tuples from the input images.
+        (grayscale microtubule, grayscale protein, grayscale nuclei).
 
-        # stack channels
-        cell = np.dstack((cell_microtubule,cell_nucleoli,cell_nuclei))         
-        cell = (cell*255).astype(np.uint8) #the input file was uint16         
+    Raises:
+        IndexError: if the input lists are not the same size.
+    """
+    image_arrays = []
+    num_images = len(nuclei_imgs)
+    for index in range(num_images):
+        nuclei_img = nuclei_imgs[index]
+        microtubule_img = microtubule_imgs[index]
+        protein_img = protein_imgs[index]
 
-        # align cell to the 1st major axis  
-        theta=region.orientation*180/np.pi #radiant to degree conversion
-        cell = ndi.rotate(cell, 90-theta)
+        current_array = []
 
-        # resize images
-        fig = resize_pad(cell) # default size is 256x256
-        # center to the center of mass of the nucleus
-        fig = shift_center_mass(fig)
-        fig = Image.fromarray(fig)
-        name = "%s_cell%s.%s" % ((nuclei[index].split("TIF_GZ/"))[1].split("blue")[0],str(i), "png")
-        name = name.replace("/", "_")
-        
-        savepath= os.path.join(imageoutput, name)
-        #plt.savefig(savepath)
-        fig.save(savepath)
+        for i, img in enumerate([microtubule_img, protein_img, nuclei_img]):
+            try:
+                if img.endswith('.gz'):
+                    file_handle = gzip.open(img)
+                else:
+                    file_handle = open(img)
+                img_arr = plt.imread(file_handle)
+                file_handle.close()
 
+                if len(img_arr.shape) > 2:
+                    img_arr = img_arr[:, :, i]
+                current_array.append(img_arr)
+
+            except IOError as e:
+                logging.error('{}, when reading {}'.format(e, img))
+
+        yield current_array
+
+
+def cut_bounding_box(im_arrays):
+    """
+    Cut out individual cells from images.
+    Each of the arguments to this function should be lists of the same length.
+    The elements on the same index in the different arrays are assumed to be
+    from the same original image.
+
+    Arguments:
+        microtubule_arrays: A list of grayscale microtubule image arrays.
+        protein_arrays: A list of grayscale protein image arrays.
+        nuclei_arrays: A list of grayscale nuclei image arrays.
+
+    Returns:
+        A generator which yields a list of cell arrays for each image
+        in succession.
+    """
+    images = []
+    for arrays in im_arrays:
+        cells = []
+        seeds, num = watershed_lab(arrays[2], rm_border=True)
+        for i, region in enumerate(skimage.measure.regionprops(seeds)):
+            minr, minc, maxr, maxc = region.bbox
+            mask = seeds[minr:maxr, minc:maxc].astype(np.uint8)
+            mask[mask != region.label] = 0
+            mask[mask == region.label] = 1
+
+            cell_nuclei = pixel_norm(arrays[2][minr:maxr, minc:maxc] * mask)
+            cell_nucleoli = pixel_norm(arrays[1][minr:maxr, minc:maxc] * mask)
+            cell_microtubule = np.full_like(cell_nuclei, 0)
+
+            cell = np.dstack((cell_microtubule, cell_nucleoli, cell_nuclei))
+            cell = (cell * 255).astype(np.uint8)  # the input file was uint16
+
+            # Align cell orientation
+            theta = region.orientation * 180 / np.pi  # radiant to degree
+            cell = ndi.rotate(cell, 90 - theta)
+
+            cells.append(cell)
+        yield cells
+
+    return images
+
+
+@click.command()
+@click.argument('imageinput')
+@click.argument('imageoutput')
+@click.option('--blue-suffix', default='blue.tif.gz',
+              help='Set the blue image suffix')
+@click.option('--green-suffix', default='green.tif.gz',
+              help='Set the green image suffix')
+@click.option('--red-suffix', default='red.tif.gz',
+              help='Set the red image suffix')
+@click.option('--verbose', default=False, is_flag=True)
+def main(imageinput, imageoutput, blue_suffix, green_suffix, red_suffix,
+         verbose):
+    if not os.path.exists(imageoutput):
+        os.makedirs(imageoutput)
+
+    if verbose:
+        numeric_level = getattr(logging, 'INFO')
+        logging.basicConfig(level=numeric_level)
+
+    nuclei_imgs = find(imageinput, suffix=blue_suffix, recursive=False)
+    microtubule_imgs = []
+    protein_imgs = []
+    logging.info('Finding images')
+
+    for nucleus_img in nuclei_imgs:
+        microtubule_imgs.append(nucleus_img.replace(blue_suffix, red_suffix))
+        protein_imgs.append(nucleus_img.replace(blue_suffix, green_suffix))
+
+    logging.info('Setting up extraction')
+    im_arrays = extract_img_arrays(microtubule_imgs, protein_imgs, nuclei_imgs)
+
+    logging.info('Setting up bounding box separation')
+    cells = cut_bounding_box(im_arrays)
+
+    logging.info('Segmenting')
+    for i, (image, filename) in enumerate(zip(cells, nuclei_imgs)):
+        if verbose:
+            progress = i / len(nuclei_imgs) * 100
+            print('\r{:.2f}% done'.format(progress), end='', flush=True)
+
+        filename = filename.replace(blue_suffix, '')
+        filename = os.path.basename(filename)
+        filename = os.path.join(imageoutput, filename)
+
+        for i, cell in enumerate(image):
+            fig = resize_pad(cell)
+            fig = shift_center_mass(fig)
+            fig = Image.fromarray(fig)
+
+            savename = filename + str(i) + '.png'
+            fig.save(savename)
+
+    if verbose:
+        print()
+
+
+if __name__ == '__main__':
+    main()
