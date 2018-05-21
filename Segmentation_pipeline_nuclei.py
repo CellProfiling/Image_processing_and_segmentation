@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Thu Mar  1 12:52:38 2018
-Last Change: 21/05/2018 13:41
+Last Change: 21/05/2018 14:16
 
 @author: trangle
 
@@ -19,6 +19,7 @@ import skimage
 from scipy import ndimage as ndi
 from PIL import Image
 import gzip
+import matplotlib.patches as mpatches
 
 from Segmentation_pipeline_helper import find, watershed_lab, resize_pad
 from Segmentation_pipeline_helper import shift_center_mass, pixel_norm
@@ -79,7 +80,23 @@ def extract_img_arrays(microtubule_imgs, protein_imgs, nuclei_imgs):
         yield current_array
 
 
-def cut_bounding_box(im_arrays):
+def plot_boundaries(nucleus_array, regions):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.imshow(nucleus_array)
+    for region in regions:
+        # take regions with large enough areas
+        if region.area >= 20000:
+            # draw rectangle around segmented coins
+            minr, minc, maxr, maxc = region.bbox
+            rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
+                                      fill=False, edgecolor='red', linewidth=2)
+            ax.add_patch(rect)
+    ax.set_axis_off()
+    plt.tight_layout()
+    plt.show()
+
+
+def cut_bounding_box(im_arrays, plot=False):
     """
     Cut out individual cells from images.
     Each of the arguments to this function should be lists of the same length.
@@ -99,7 +116,12 @@ def cut_bounding_box(im_arrays):
     for arrays in im_arrays:
         cells = []
         seeds, num = watershed_lab(arrays[2], rm_border=True)
-        for i, region in enumerate(skimage.measure.regionprops(seeds)):
+
+        regions = skimage.measure.regionprops(seeds)
+        if plot:
+            plot_boundaries(arrays[2], regions)
+
+        for i, region in enumerate(regions):
             minr, minc, maxr, maxc = region.bbox
             mask = seeds[minr:maxr, minc:maxc].astype(np.uint8)
             mask[mask != region.label] = 0
@@ -131,9 +153,10 @@ def cut_bounding_box(im_arrays):
               help='Set the green image suffix')
 @click.option('--red-suffix', default='red.tif.gz',
               help='Set the red image suffix')
+@click.option('--plot-boundaries', default=False, is_flag=True)
 @click.option('--verbose', default=False, is_flag=True)
 def main(imageinput, imageoutput, blue_suffix, green_suffix, red_suffix,
-         verbose):
+         verbose, plot_boundaries):
     if not os.path.exists(imageoutput):
         os.makedirs(imageoutput)
 
@@ -154,8 +177,10 @@ def main(imageinput, imageoutput, blue_suffix, green_suffix, red_suffix,
     im_arrays = extract_img_arrays(microtubule_imgs, protein_imgs, nuclei_imgs)
 
     logging.info('Setting up bounding box separation')
-    cells = cut_bounding_box(im_arrays)
+    cells = cut_bounding_box(im_arrays, plot=plot_boundaries)
 
+    if plot_boundaries:
+        logging.info('Segmentation plots enabled')
     logging.info('Segmenting')
     for i, (image, filename) in enumerate(zip(cells, nuclei_imgs)):
         if verbose:
@@ -176,7 +201,6 @@ def main(imageinput, imageoutput, blue_suffix, green_suffix, red_suffix,
 
     if verbose:
         print()
-
 
 if __name__ == '__main__':
     main()

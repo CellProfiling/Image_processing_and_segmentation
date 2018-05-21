@@ -64,7 +64,7 @@ def watershed_lab(image, marker = None, rm_border = False):
     # remove too small or too large object 
     output = np.zeros(labeled_obj.shape)
     for region in regionprops(labeled_obj):
-        if region.area >= 2000:# <= thres_high:
+        if region.area >= 20000:# <= thres_high:
             # if the component has a volume within the two thresholds,
             # set the output image to 1 for every pixel of the component
             output[labeled_obj == region.label] = 1
@@ -78,7 +78,8 @@ def watershed_lab2(image, marker = None):
     and keep the relative ratio of the cells to each other
     return labeled cell body, each has 1 nuclei
     """
-    distance = ndi.distance_transform_edt(image)
+    #distance = ndi.distance_transform_edt(image) #if the cells are sparse    
+    distance = ndi.distance_transform_edt(marker) #if the cells are crowded
     distance = clear_border(distance, buffer_size=50)
     # determine markers for watershed if not specified
     if marker is None:
@@ -172,8 +173,8 @@ def pixel_norm(image):
     """
     
     # background correction: substracting the most populous pixel value
-    image = image - np.median(image)
-    image[image < 0] = 0
+    #image = image - np.median(image)
+    #image[image < 0] = 0
     
     # rescaling image intensity to a value between 0 and 1
     image = (image - image.min())/(image.max() - image.min())
