@@ -1,3 +1,4 @@
 # Image_processing_and_segmentation
 
-# Release 1.0 created on 14,08,2018
+# Pre-release 0.1.1 created on 14,08,2018
+[![DOI](https://zenodo.org/badge/122044349.svg)](https://zenodo.org/badge/latestdoi/122044349)
