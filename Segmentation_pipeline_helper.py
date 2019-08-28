@@ -14,9 +14,9 @@ from skimage.segmentation import clear_border
 from scipy import ndimage as ndi
 from PIL import Image
 import numpy as np
+import skimage
 
-
-def find(dirpath, prefix=None, suffix=None, recursive=True):
+def find(dirpath, prefix=None, suffix=None, recursive=True, full_path=True):
     """Function to find recursively all files with specific prefix and suffix in a directory
     Return a list of paths
     """
@@ -28,7 +28,10 @@ def find(dirpath, prefix=None, suffix=None, recursive=True):
         suffix = ''
     for (folders, subfolders, files) in os.walk(dirpath):
         for filename in [f for f in files if f.startswith(prefix) and f.endswith(suffix)]:
+            if full_path:
                 l.append(os.path.join(folders, filename))
+            else:
+                l.append(filename)
         if not recursive:
             break
     return l
@@ -78,8 +81,8 @@ def watershed_lab2(image, marker = None):
     and keep the relative ratio of the cells to each other
     return labeled cell body, each has 1 nuclei
     """
-    #distance = ndi.distance_transform_edt(image) #if the cells are sparse    
-    distance = ndi.distance_transform_edt(marker) #if the cells are crowded
+    distance = ndi.distance_transform_edt(image) #if the cells are sparse
+    #distance = ndi.distance_transform_edt(marker) #if the cells are crowded
     distance = clear_border(distance, buffer_size=50)
     # determine markers for watershed if not specified
     if marker is None:
@@ -93,19 +96,21 @@ def watershed_lab2(image, marker = None):
     return segmentation
 
  
-def resize_pad(image, size = 256): #input an Image object (PIL)
+def resize_pad(image, size = 256): 
     """Function to resize and pad segmented image, keeping the aspect ratio 
     and keep the relative ratio of the cells to each other
     """
+    '''
+    #input an Image object (PIL)
     image = Image.fromarray(image)
     desired_size = size 
     
     # current size of the image
     old_size=image.size
     # old_size[0] is in (width, height) format
-    ratio = 0.3 #float(desired_size)/max(old_size) 
+    ratio = 0.25 #float(desired_size)/max(old_size) 
     
-    # size of the image after reduced by half
+    # size of the image after reduced by ratio
     new_size = tuple([int(x*ratio) for x in old_size])
     
     # resize image
@@ -115,8 +120,30 @@ def resize_pad(image, size = 256): #input an Image object (PIL)
     new_im = Image.new("RGB", (desired_size, desired_size))
     new_im.paste(im, ((desired_size-new_size[0])//2,
                         (desired_size-new_size[1])//2))
+    '''
+    ratio=0.25
+    im = skimage.transform.rescale(image, ratio)
     
-    return new_im
+    
+    new_im = np.zeros((size,size,3))
+    
+    dif_axis0 = (size-im.shape[0])//2
+    dif_axis1 = (size-im.shape[1])//2
+    
+    if (size > im.shape[0]) &  (size > im.shape[1]):
+        #if segmented cell is smaller than desired size:    
+        new_im[dif_axis0: dif_axis0+im.shape[0], dif_axis1: dif_axis1+im.shape[1],:] = im   
+    elif (size < im.shape[0]) &  (size > im.shape[1]):
+        im = im[np.abs(dif_axis0): np.abs(dif_axis0)+size,:,:]
+        new_im[:,dif_axis1:dif_axis1+im.shape[1],:] = im
+    elif (size > im.shape[0]) &  (size < im.shape[1]): 
+        im = im[:,np.abs(dif_axis1): np.abs(dif_axis1)+size,:]
+        new_im[dif_axis0: dif_axis0+im.shape[0],:,:] = im
+    elif (size < im.shape[0]) &  (size < im.shape[1]):
+        new_im = im[np.abs(dif_axis0): np.abs(dif_axis0)+size,np.abs(dif_axis1): np.abs(dif_axis1)+size,:]
+    
+        
+    return new_im #this is  float64
 
 
 
@@ -126,7 +153,7 @@ def find_border(labels, buffer_size=0, bgval=0, in_place=False):
     Parameters
     ----------
     labels : (M[, N[, ..., P]]) array of int or bool
-        Imaging data labels.
+        Imaging data labels.>
     buffer_size : int, optional
         The width of the border examined.  By default, only objects
         that touch the outside of the image are removed.
@@ -177,7 +204,8 @@ def pixel_norm(image):
     #image[image < 0] = 0
     
     # rescaling image intensity to a value between 0 and 1
-    image = (image - image.min())/(image.max() - image.min())
+    #image = (image - image.min())/(image.max() - image.min())
+    image = (image - image.mean())/image.std()
         
     return image
     
@@ -186,12 +214,12 @@ def shift_center_mass(image):
     assuming channel 2 is the nuclei channel
     """
    
-    img = np.asanyarray(image)
-    cm_nu = ndi.measurements.center_of_mass(img[:,:,2])
+    #img = np.asanyarray(image)
+    cm_nu = ndi.measurements.center_of_mass(image[:,:,2])
     
-    Shift = np.zeros_like(img)
+    Shift = np.zeros_like(image)
     for channel in (0,1,2): 
-        im = img[:,:,channel]
+        im = image[:,:,channel]
         c = [im.shape[0]/2.,im.shape[1]/2.]
         S = np.roll(im, int(round(c[0]-cm_nu[0])) , axis=0)
         S = np.roll(S, int(round(c[1]-cm_nu[1])), axis=1)        
